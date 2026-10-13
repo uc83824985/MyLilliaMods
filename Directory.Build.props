@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <!-- Remote: unpack the development reference archive under references/.
+         Local: keep using the BepInEx installed beside this repository.
+         Either can be overridden with -p:BepInExRoot=/absolute/path/BepInEx. -->
+    <BepInExRoot Condition="'$(BepInExRoot)' == '' and Exists('$(MSBuildThisFileDirectory)references/BepInEx/core/BepInEx.Core.dll')">$(MSBuildThisFileDirectory)references/BepInEx</BepInExRoot>
+    <BepInExRoot Condition="'$(BepInExRoot)' == ''">$(MSBuildThisFileDirectory)../BepInEx</BepInExRoot>
+  </PropertyGroup>
+</Project>

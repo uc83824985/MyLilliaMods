@@ -1,0 +1,121 @@
+{
+  "purpose": "Compile plugin and checks; not a game/runtime installation",
+  "files": [
+    {
+      "sha256": "6C898933B52149E8BCF6722305C7E4D94ADD47C9E53B364096F91721624C0877",
+      "path": "BepInEx/core/0Harmony.dll",
+      "bytes": 264192
+    },
+    {
+      "sha256": "1D492EEECD40CD4FEB7DC35AFF7F08839928AC1637D4993BBDE0060DE36B7E0A",
+      "path": "BepInEx/core/BepInEx.Core.dll",
+      "bytes": 138240
+    },
+    {
+      "sha256": "46CF1EF802BDF8CB6587FC1E4D98F7AF1073A60487B39A64E230E6F6E4C23AEC",
+      "path": "BepInEx/core/BepInEx.Unity.IL2CPP.dll",
+      "bytes": 102912
+    },
+    {
+      "sha256": "65AB051A681C2C1E52DF7596FF738BE401AAE72CFF882FF18241CF54A3EA38A4",
+      "path": "BepInEx/core/Il2CppInterop.Runtime.dll",
+      "bytes": 284672
+    },
+    {
+      "sha256": "FDA8B931E292610382402C76CBA7B6BDBB8541EC2A697D9C8174DDB2B2B78FB2",
+      "path": "BepInEx/interop/Assembly-CSharp.dll",
+      "bytes": 5117952
+    },
+    {
+      "sha256": "B713CE6D1615CBDB50308CA5D1533E9DA98E8D3EFCA357FDC06EE5A839922DA0",
+      "path": "BepInEx/interop/Il2Cppmscorlib.dll",
+      "bytes": 5680640
+    },
+    {
+      "sha256": "5013D60DA598F839E937A405E9ED95A7D9FC7E9E54F900B61240E646A387F157",
+      "path": "BepInEx/interop/Il2CppSystem.Core.dll",
+      "bytes": 1425920
+    },
+    {
+      "sha256": "58C3AC7B3289C5EB5B706677793DE7F9F748F2F948411A7F90FC3C69C33B31BF",
+      "path": "BepInEx/interop/Il2CppSystem.dll",
+      "bytes": 1649664
+    },
+    {
+      "sha256": "B07121D47C7945F7A1BB3E3E2A242E81DDBC5CF9F04C2F0950638A81246ED495",
+      "path": "BepInEx/interop/Unity.Addressables.dll",
+      "bytes": 357376
+    },
+    {
+      "sha256": "81C28B5A6BE95C6E78DB34BA421BECB0BB6ADAA758B1FC0F1A5801DDA24D7A04",
+      "path": "BepInEx/interop/Unity.ResourceManager.dll",
+      "bytes": 473088
+    },
+    {
+      "sha256": "DB135E0BF26F798A77F11D691A02647013338A35B42EE54E7175C8DA23DE7199",
+      "path": "BepInEx/interop/UnityEngine.AIModule.dll",
+      "bytes": 120320
+    },
+    {
+      "sha256": "0E8DA2AE7AACD68DB6E21F2B031BA46777A6A6982829289CDE756637B4730A2E",
+      "path": "BepInEx/interop/UnityEngine.AnimationModule.dll",
+      "bytes": 644608
+    },
+    {
+      "sha256": "1967B7F11D37276386494D4F995B982A4775BF327570A4F38332683EBFB68B2E",
+      "path": "BepInEx/interop/UnityEngine.AudioModule.dll",
+      "bytes": 151552
+    },
+    {
+      "sha256": "F1DECE3D22457C6CF5C798746C28FC34D1939A656667E3A41B1C4929681E45FE",
+      "path": "BepInEx/interop/UnityEngine.CoreModule.dll",
+      "bytes": 3459584
+    },
+    {
+      "sha256": "CE9FD093B6400FBCF4455B981AE6375F71F554A852E0299B3ABA5E7CCE2F8A54",
+      "path": "BepInEx/interop/UnityEngine.DirectorModule.dll",
+      "bytes": 20480
+    },
+    {
+      "sha256": "FDEC11379AF5ADB9FBF66BDF20152C4AE3C8BB33CB96878B3FECAD0D5DCDF637",
+      "path": "BepInEx/interop/UnityEngine.ImageConversionModule.dll",
+      "bytes": 11264
+    },
+    {
+      "sha256": "CF473719B8D4D0DAFE3F01115C80B806BF27FE4B771F538583EB5C42FCCB563B",
+      "path": "BepInEx/interop/UnityEngine.IMGUIModule.dll",
+      "bytes": 432640
+    },
+    {
+      "sha256": "E2F9E1F6D4333D81719A1FB21EFB732E6336AE829D102F43E038616E89D2CC98",
+      "path": "BepInEx/interop/UnityEngine.InputLegacyModule.dll",
+      "bytes": 57856
+    },
+    {
+      "sha256": "69B732DFC18ED5FE1D16F41531FD2569EF9AC80F5F477712FA68522B06BE8C33",
+      "path": "BepInEx/interop/UnityEngine.PhysicsModule.dll",
+      "bytes": 279040
+    },
+    {
+      "sha256": "84A8282B40BBC7D0F6FF18AE3A71DC7FA70FD1BD6DA203B4AC2BD35C884192E9",
+      "path": "BepInEx/interop/UnityEngine.ScreenCaptureModule.dll",
+      "bytes": 5120
+    },
+    {
+      "sha256": "D71C40AAE0C37B8CEE4AC883F6DF2B7D717CA56E34EF23F6C826586BFE783A3B",
+      "path": "BepInEx/interop/UnityEngine.TextRenderingModule.dll",
+      "bytes": 59904
+    },
+    {
+      "sha256": "8F13996CCDE07956B171E4113DB4E18F26AE2A2DC20B2004C18E4C5B84C26A3A",
+      "path": "BepInEx/interop/UnityEngine.UI.dll",
+      "bytes": 814592
+    },
+    {
+      "sha256": "F47A29A19D09AD1332F2EA9537C3CE4334E8E8FB47F300E0644BA82A117EFD76",
+      "path": "BepInEx/interop/UnityEngine.UIModule.dll",
+      "bytes": 65024
+    }
+  ],
+  "targetFramework": "net6.0"
+}

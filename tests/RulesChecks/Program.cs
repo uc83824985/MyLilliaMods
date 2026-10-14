@@ -15,6 +15,14 @@ foreach (var sample in new[] { (2.001f, 0f, 0f), (1f, 45.001f, 0f), (1f, 180f, 0
     Check(!Rules.Sector(sample.Item1, sample.Item2, sample.Item3, 2, 90, 1.2f), "reject outside or invalid " + sample);
 Check(Rules.Validate(d with { WindowStart = .01f }, c) != null, "window cannot precede dash");
 Check(Rules.Validate(d with { WindowEnd = .4f }, c) != null, "window cannot extend into recovery");
-Check(Rules.Validate(d, c with { CommitAt = c.Windup }) != null, "commit must precede resolve");
-Check(Rules.Validate(d, c with { TriggerRadius = 3 }) != null, "start range cannot exceed hit range");
+Check(Rules.Validate(d, c with { CommitAt = c.Windup + .01f }) != null, "commit must precede resolve");
+Check(Rules.Validate(d, c with { TriggerRadius = 3, CommitAt = c.Windup }) == null, "heavy can start outside hit range and track through full windup");
+
+
+var aligned = new DodgeSettings(25, 0, .3f, 12.572f, .6f, 0, 0, .1f);
+Check(Rules.Phase(0, aligned) == DodgePhase.Dash && Rules.Window(0, aligned) && !Rules.Window(.1f, aligned), "simulator immediate dash and perfect window");
+Check(Rules.RecoveryMoveScale(.3f, aligned) == 0 && Math.Abs(Rules.RecoveryMoveScale(.6f, aligned) - .5f) < .0001f && Rules.RecoveryMoveScale(.9f, aligned) > .999f, "linear recovery starts at zero and returns to full speed");
+Check(Rules.Phase(.3f, aligned with { Recovery = 0 }) == DodgePhase.Ready, "perfect contact skips recovery after remaining burst");
+Check(Rules.ChooseCapture(.49f, .5f) == CaptureKind.Heavy && Rules.ChooseCapture(.5f, .5f) == CaptureKind.Light, "equal mixture chooses each attack independently of range");
+
 Console.WriteLine($"ALL {count} RULE CHECKS PASSED");

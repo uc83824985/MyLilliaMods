@@ -30,19 +30,21 @@ internal sealed class Settings
     internal sealed record Fixed<T>(T Value);
     internal readonly List<Setting> Rows = new();
     internal readonly ConfigFile File;
-    internal ConfigEntry<bool> Enabled, CaptureEnabled, DodgeEnabled, Debug, Verbose;
+    internal ConfigEntry<bool> Enabled, CaptureEnabled, DodgeEnabled, ShowAttackRange, Debug, Verbose;
     internal ConfigEntry<KeyCode> DodgeKey, PanelKey, DebugKey;
     internal ConfigEntry<float> TriggerRadius, TriggerAngle, Radius, Angle, Windup, MissRecovery,
-        Cost, Dash, Speed, Recovery, RecoveryScale, WindowDuration;
-    internal readonly Fixed<float> Startup = new(.04f), Height = new(1.2f), CommitAt = new(.2f), TurnSpeed = new(180),
+        Cost, Dash, Speed, Recovery, RecoveryScale, WindowDuration, AnimationSeconds,
+        HeavyChance, HeavyTriggerRadius, HeavyWindup, HeavyTurnSpeed, HeavyMoveScale, ChaseSpeedRatio;
+    internal readonly Fixed<float> Startup = new(0f), Height = new(1.2f), TurnSpeed = new(900),
         ProbeHeight = new(.9f), RedIntensity = new(2), WhiteIntensity = new(1), WindowIntensity = new(3),
-        BlinkHz = new(9), GlowScale = new(.018f), DebugWidth = new(.025f), DebugHeight = new(.06f),
+        DebugWidth = new(.045f), DebugHeight = new(.08f),
         ScanInterval = new(.25f), LogInterval = new(1), AnimationBlend = new(.08f);
     internal readonly Fixed<int> ObstacleMask = new(-1), ArcSegments = new(32);
     internal readonly Fixed<bool> TryAnimation = new(true);
     internal readonly Fixed<string> GrabState = new(""), MissState = new("");
     internal Color Red => Color.red;
     internal Color White => Color.white;
+    internal Color Pink => new(255f / 255, 102f / 255, 182f / 255);
 
     internal Settings(ConfigFile file)
     {
@@ -70,24 +72,32 @@ internal sealed class Settings
         PanelKey = Key("General", "PanelKey", KeyCode.F6, "调参面板按键");
         DebugKey = Key("General", "DebugKey", KeyCode.F7, "调试显示按键");
         DodgeKey = Key("Dodge", "Key", KeyCode.Space, "闪避按键（None 禁用）");
-        Cost = Number("Dodge", "StaminaCost", 50, 0, 10000, "体力消耗（原生点数）");
+        Cost = Number("Dodge", "StaminaCost", 25, 0, 10000, "体力消耗（原生点数）");
         Dash = Number("Dodge", "DashSeconds", .3f, .01f, 3, "突进时间 s");
         Speed = Number("Dodge", "RunSpeedMultiplier", 2, .1f, 100, "突进／全局缩放后的跑步速度倍率");
         Recovery = Number("Dodge", "RecoverySeconds", .6f, .01f, 5, "恢复时间 s");
-        RecoveryScale = Number("Dodge", "RecoverySpeedScale", .1f, 0, 1, "恢复移动倍率");
-        WindowDuration = Number("Dodge", "PerfectWindowSeconds", .06f, 0, 3, "完美窗口时长 s（限于突进内；0 关闭）");
+        RecoveryScale = Number("Dodge", "RecoverySpeedScale", 0f, 0, 1, "恢复起始倍率（线性回到 1）");
+        AnimationSeconds = Number("Dodge", "AnimationSeconds", .55f, .01f, 5, "跑动动画总时长 s（受动作结束限制）");
+        WindowDuration = Number("Dodge", "PerfectWindowSeconds", .1f, 0, 3, "完美窗口时长 s（限于突进内；0 关闭）");
         if (migrateWindow && float.IsFinite(oldEnd - oldStart) && oldEnd > oldStart)
         {
             WindowDuration.Value = Math.Clamp(oldEnd - oldStart, 0, 3);
             Plugin.Log.LogInfo($"[Config] 完美窗口迁移为时长 {WindowDuration.Value:F3}s；保留其他玩法参数。");
         }
-        TriggerRadius = Number("Capture", "TriggerRadius", 1.8f, .05f, 20, "抓捕启动半径 m");
+        TriggerRadius = Number("Capture", "TriggerRadius", 1.4f, .05f, 20, "轻刀启动半径 m");
         TriggerAngle = Number("Capture", "TriggerFullAngle", 120, 1, 360, "启动完整扇形角 °");
-        Radius = Number("Capture", "HitRadius", 2, .05f, 20, "命中半径 m");
-        Angle = Number("Capture", "HitFullAngle", 90, 1, 360, "命中完整扇形角 °");
+        Radius = Number("Capture", "HitRadius", 1.5f, .05f, 20, "命中半径 m");
+        Angle = Number("Capture", "HitFullAngle", 100, 1, 360, "命中完整扇形角 °");
         Windup = Number("Capture", "WindupSeconds", .3f, .01f, 10, "前摇时间 s");
-        MissRecovery = Number("Capture", "MissRecoverySeconds", .85f, .01f, 10, "扑空原地僵直 s");
-        Debug = Bool("Debug", "ShowGeometry", false, "显示扇形／方向／时序");
+        MissRecovery = Number("Capture", "MissRecoverySeconds", 1.5f, .01f, 10, "扑空原地僵直 s");
+        ShowAttackRange = Bool("Capture", "ShowAttackRange", true, "前摇显示命中范围（独立于 F7）");
+        ChaseSpeedRatio = Number("Capture", "ChaseSpeedRatio", 1.1f, .1f, 5, "常规追击／玩家实际跑速倍率");
+        HeavyChance = Number("Heavy", "Chance", .5f, 0, 1, "重刀概率（0 仅轻刀；1 仅重刀）");
+        HeavyTriggerRadius = Number("Heavy", "TriggerRadius", 2.6f, .05f, 20, "重刀启动半径 m");
+        HeavyWindup = Number("Heavy", "WindupSeconds", .6f, .01f, 10, "重刀前摇 s");
+        HeavyTurnSpeed = Number("Heavy", "TurnDegreesPerSecond", 360, 0, 1440, "重刀全程转向 °/s");
+        HeavyMoveScale = Number("Heavy", "MoveSpeedScale", 1.2f, 0, 3, "重刀／正常警察跑速倍率");
+        Debug = Bool("Debug", "ShowGeometry", false, "显示闪避方向／动作时序");
         Verbose = Bool("Logging", "Verbose", false, "详细诊断日志");
         if (PanelKey.Value == KeyCode.None || PanelKey.Value == DebugKey.Value || PanelKey.Value == DodgeKey.Value ||
             (DebugKey.Value != KeyCode.None && DebugKey.Value == DodgeKey.Value))
@@ -98,8 +108,7 @@ internal sealed class Settings
         var error = Rules.Validate(Dodge(), Capture());
         if (error != null)
         {
-            Plugin.Log.LogWarning("[Config] " + error + " 仅修正启动半径。");
-            TriggerRadius.Value = Math.Min(TriggerRadius.Value, Radius.Value);
+            Plugin.Log.LogWarning("[Config] " + error);
         }
         File.Save(); File.SaveOnConfigSet = autoSave; Refresh();
     }
@@ -126,14 +135,16 @@ internal sealed class Settings
     }
     internal DodgeSettings Dodge(float scaledRunSpeed = 1)
     {
-        // Preserve the original 0.04s delay into the dash. Short dashes shorten this delay
-        // and clip the window, so adjusting dash duration no longer invalidates all edits.
-        float start = Startup.Value + Math.Min(.04f, Dash.Value * .25f);
+        float start = Startup.Value;
         float end = Math.Min(start + WindowDuration.Value, Startup.Value + Dash.Value);
-        return new(Cost.Value, Startup.Value, Dash.Value, Speed.Value * scaledRunSpeed, Recovery.Value, RecoveryScale.Value, start, end);
+        return new(Cost.Value, Startup.Value, Dash.Value, Speed.Value * scaledRunSpeed, Recovery.Value, RecoveryScale.Value, start, end, AnimationSeconds.Value);
     }
-    internal CaptureSettings Capture() => new(TriggerRadius.Value, TriggerAngle.Value, Radius.Value, Angle.Value,
-        Height.Value, Windup.Value, Math.Min(CommitAt.Value, Windup.Value * .5f), TurnSpeed.Value, MissRecovery.Value, ObstacleMask.Value, ProbeHeight.Value);
+    internal CaptureSettings Capture(CaptureKind kind = CaptureKind.Light) => new(
+        kind == CaptureKind.Heavy ? HeavyTriggerRadius.Value : TriggerRadius.Value, TriggerAngle.Value, Radius.Value, Angle.Value,
+        Height.Value, kind == CaptureKind.Heavy ? HeavyWindup.Value : Windup.Value,
+        kind == CaptureKind.Heavy ? HeavyWindup.Value : Math.Max(0, Windup.Value - .005f),
+        kind == CaptureKind.Heavy ? HeavyTurnSpeed.Value : TurnSpeed.Value, MissRecovery.Value,
+        ObstacleMask.Value, ProbeHeight.Value, kind == CaptureKind.Heavy ? HeavyMoveScale.Value : 1, .1f, kind);
     internal void Refresh() { foreach (var row in Rows) row.Refresh(); }
     internal string Apply(bool defaults = false)
     {
@@ -172,11 +183,10 @@ internal sealed class Settings
         }
         finally { File.SaveOnConfigSet = autoSave; }
     }
-    internal string DodgeSummary() => $"闪避：跑速×{Speed.Value:F2}，突进 {Dash.Value:F3}s，后摇 {Recovery.Value:F3}s×{RecoveryScale.Value:F2}，完美窗 {WindowDuration.Value:F3}s，体力 {Cost.Value:F2}";
+    internal string DodgeSummary() => $"闪避：跑速×{Speed.Value:F2}，突进 {Dash.Value:F3}s，后摇 {Recovery.Value:F3}s（{RecoveryScale.Value:F2}→1），动画 {AnimationSeconds.Value:F3}s，完美窗 {WindowDuration.Value:F3}s，体力 {Cost.Value:F2}";
     internal string Reload()
     {
         File.Reload();
-        if (TriggerRadius.Value > Radius.Value) TriggerRadius.Value = Radius.Value;
         Refresh(); Plugin.Log.LogInfo("[Config] 从磁盘重载；" + DodgeSummary());
         return "已从磁盘重载；下一次动作生效。\n" + DodgeSummary();
     }

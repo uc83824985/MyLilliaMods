@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace LilliaChasePrototype;
 
-[BepInPlugin(Guid, "Lillia Chase Prototype", "0.1.3")]
+[BepInPlugin(Guid, "Lillia Chase Prototype", "0.1.9")]
 public sealed class Plugin : BasePlugin
 {
     public const string Guid = "local.lillia.chaseprototype";
@@ -29,7 +29,7 @@ public sealed class Plugin : BasePlugin
             ClassInjector.RegisterTypeInIl2Cpp<RuntimeHost>();
             host = AddComponent<RuntimeHost>();
             RuntimeHost.Live = host;
-            Log.LogInfo("[Boot] v0.1.3 已加载；Space 闪避，F6 参数，F7 扇形调试。独立配置，不依赖 LilliaSystem。");
+            Log.LogInfo("[Boot] v0.1.9 已加载；Space 闪避，F6 参数，F7 方向与时序调试。独立配置，不依赖 LilliaSystem。");
         }
         catch (Exception ex)
         {
@@ -70,6 +70,7 @@ public sealed class RuntimeHost : MonoBehaviour
                 {
                     Plugin.Options.Debug.Value = !Plugin.Options.Debug.Value;
                     Plugin.Options.Refresh();
+                    Plugin.Log.LogInfo($"[Visual] geometry-debug={Plugin.Options.Debug.Value}; attack-range={Plugin.Options.ShowAttackRange.Value}");
                 }
             }
             if (PanelOpen) { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; KeyBindings.playerLocked = true; }

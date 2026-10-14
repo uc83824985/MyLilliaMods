@@ -54,7 +54,7 @@ internal static class Panel
                     var rect = label.GetComponent<RectTransform>(); rect.anchorMin = rect.anchorMax = new Vector2(p.x, p.y);
                     rect.pivot = new Vector2(.5f, .5f); rect.anchoredPosition = Vector2.zero;
                     float remaining = action.Phase == CapturePhase.Recovery ? action.Settings.Recovery - action.RecoveryElapsed : action.Settings.Windup - action.Elapsed;
-                    label.text = $"#{action.Number} {action.Phase} {remaining:F2}s";
+                    label.text = $"#{action.Number} {(action.Settings.Kind == CaptureKind.Heavy ? "重刀" : "轻刀")} {action.Phase} {remaining:F2}s";
                 }
         }
         foreach (long id in captureLabels.Keys.Where(id => !Plugin.Engine.Captures.ContainsKey(id)).ToArray())

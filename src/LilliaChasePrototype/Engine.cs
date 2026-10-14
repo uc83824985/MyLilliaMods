@@ -15,6 +15,7 @@ internal sealed class Police
     internal readonly SeduciblePoliceControl? Seducible;
     internal readonly NPCStateControl? Chief;
     internal readonly long Id;
+    internal readonly Presentation Visual = new();
     internal Police(DefaultCharacterControl owner)
     {
         Owner = owner; Ordinary = owner.TryCast<PoliceStateControl>(); Seducible = owner.TryCast<SeduciblePoliceControl>();
@@ -48,6 +49,7 @@ internal sealed class CaptureAction
     internal int Number;
     internal float Elapsed, RecoveryElapsed;
     internal Vector3 Direction;
+    internal Vector3 LastSeenPosition;
     internal Quaternion Rotation;
     internal Animator? Animator;
     internal NavMeshAgent? Agent;
@@ -56,7 +58,9 @@ internal sealed class CaptureAction
     internal int OriginalState;
     internal float OriginalTime;
     internal bool AnimationPlayed;
-    internal readonly Presentation Visual = new();
+    internal float MoveSpeed;
+    internal readonly DodgeAnimation RunAnimation = new();
+    internal Presentation Visual = new();
 }
 
 internal sealed class NativeScope
@@ -92,16 +96,21 @@ internal sealed class Engine
     internal Vector3 DodgeDirection;
     internal int DodgeNumber;
     internal bool ProtectionUsed;
+    internal float PerfectFlashRemaining;
     internal bool CaptureHooksReady, DodgeHooksReady;
     internal string LastStatus = "就绪";
     internal readonly Presentation DodgeVisual = new();
     internal readonly DodgeAnimation DodgeAnimation = new();
+    internal readonly ChaseSpeed ChaseSpeed = new();
     private int nextAction;
     private float nextScan, nextSample;
     private long worldId, characterId;
     private bool arrestCommitted;
     private Vector3 dodgeOrigin;
     private readonly Dictionary<long, float> lastRejection = new();
+    private readonly Dictionary<long, CaptureKind> capturePlans = new();
+    private readonly Dictionary<long, float> captureCooldowns = new();
+    private readonly Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<RaycastHit> captureHits = new(64);
     private static Engine Self => Plugin.Engine;
     private static Settings Options => Plugin.Options;
 
@@ -112,9 +121,9 @@ internal sealed class Engine
         {
             foreach (Type type in new[] { typeof(PoliceStateControl), typeof(SeduciblePoliceControl) })
                 Hook(type, "CheckAlertCost", nameof(AlertPrefix), nameof(AlertPostfix), nameof(AlertFinalizer));
-            Hook(typeof(PatrolMovement), "Update", nameof(PatrolPrefix));
-            Hook(typeof(PatrolMovement), "UpdateChaseMovement", nameof(PatrolPrefix));
-            Hook(typeof(PatrolMovement), "SetWalkSpeed", nameof(PatrolPrefix));
+            Hook(typeof(PatrolMovement), "Update", nameof(PatrolPrefix), nameof(PatrolPostfix));
+            Hook(typeof(PatrolMovement), "UpdateChaseMovement", nameof(PatrolPrefix), nameof(PatrolPostfix));
+            Hook(typeof(PatrolMovement), "SetWalkSpeed", nameof(PatrolPrefix), nameof(PatrolPostfix));
             Hook(typeof(DefaultCharacterControl), "SetSpeedStatus", nameof(SpeedStatusPrefix));
             CaptureHooksReady = true;
         }
@@ -134,6 +143,7 @@ internal sealed class Engine
             var before = Patch(prefix); var after = Patch(postfix); var finish = Patch(finalizer);
             // Run after other velocity modifiers; no dependency on a particular mod's types.
             if (after != null && method == "UpdateVelocity") after.priority = Priority.Last;
+            if (after != null && type == typeof(PatrolMovement)) after.priority = Priority.Last;
             if (method == "CheckStaminaStatus")
             {
                 if (before != null) before.priority = Priority.First;
@@ -164,6 +174,7 @@ internal sealed class Engine
     { __state?.Restore(); return __exception; }
     private static bool PatrolPrefix(PatrolMovement __instance)
         => !Self.Holding(__instance._characterControl ?? __instance.GetComponent<DefaultCharacterControl>());
+    private static void PatrolPostfix(PatrolMovement __instance) => Self.ChaseSpeed.Apply(Self, __instance);
     private static bool SpeedStatusPrefix(DefaultCharacterControl __instance) => !Self.Holding(__instance);
     private bool Holding(DefaultCharacterControl? owner) => owner != null && Captures.ContainsKey(owner.Pointer.ToInt64());
     private static bool InputPrefix(PlayerDirector __instance)
@@ -209,7 +220,23 @@ internal sealed class Engine
             }
             else { __0.x = direction.x * Self.DodgeSettings.Speed; __0.z = direction.z * Self.DodgeSettings.Speed; }
         }
-        else { __0.x *= Self.DodgeSettings.RecoveryScale; __0.z *= Self.DodgeSettings.RecoveryScale; }
+        else
+        {
+            float scale = Rules.RecoveryMoveScale(Self.DodgeElapsed, Self.DodgeSettings);
+            if (Self.DodgeAnimation.Active)
+            {
+                // The visible Run clip continues into recovery. Its root sample must
+                // not move a stationary player or replace the current walk/run input.
+                var input = Vector3.ProjectOnPlane(__instance._moveInputVector, Vector3.up);
+                float speed = __instance.IsRunning ? Self.DodgeAnimation.ScaledRunSpeed :
+                    Self.DodgeAnimation.BaseWalkSpeed * Self.DodgeAnimation.GlobalWalkMultiplier;
+                var horizontal = Vector3.ClampMagnitude(input, 1) * speed * scale;
+                if (__instance.Motor != null && __instance.Motor.GroundingStatus.IsStableOnGround)
+                    __0 = Vector3.ProjectOnPlane(horizontal, __instance.Motor.GroundingStatus.GroundNormal).normalized * horizontal.magnitude;
+                else { __0.x = horizontal.x; __0.z = horizontal.z; }
+            }
+            else { __0.x *= scale; __0.z *= scale; }
+        }
     }
     private static void RotationPostfix(Character __instance, ref Quaternion __0)
     {
@@ -230,6 +257,7 @@ internal sealed class Engine
         {
             Reset("scene-or-character-change"); characterId = newChar; worldId = newWorld;
             Character = currentCharacter; World = currentWorld;
+            if (Character != null) DodgeAnimation.Prepare(Character);
         }
         Character = currentCharacter; World = currentWorld;
         if (!Options.Enabled.Value) { Reset("disabled"); return; }
@@ -242,6 +270,8 @@ internal sealed class Engine
         if (!Options.DodgeEnabled.Value || !Character._movementEnabled || Character.DoingSex) StopDodge("state-disallowed");
         // Scaled game time freezes timers when the game pauses. Panel pauses the prototype while editing.
         float dt = Time.timeScale > 0f && !RuntimeHost.PanelOpen ? Time.deltaTime : 0f;
+        foreach (long id in captureCooldowns.Keys.ToArray())
+        { captureCooldowns[id] -= dt; if (captureCooldowns[id] <= 0) captureCooldowns.Remove(id); }
         AdvanceDodge(dt);
         if (Options.DodgeKey.Value != KeyCode.None && Application.isFocused && Input.GetKeyDown(Options.DodgeKey.Value))
             TryDodge();
@@ -255,7 +285,7 @@ internal sealed class Engine
             foreach (var owner in UnityEngine.Object.FindObjectsOfType<NPCStateControl>())
                 if ((owner.npcTagHolder ?? owner.GetComponent<NPCTagHolder>())?.npcType == NPCType.PoliceChief) Register(owner);
             foreach (long id in Police.Where(p => p.Value.Owner == null).Select(p => p.Key).ToArray())
-            { Police.Remove(id); lastRejection.Remove(id); }
+            { Police[id].Visual.Dispose(); Police.Remove(id); lastRejection.Remove(id); }
         }
         if (dt > 0 && !Director.IsSystemMenuOpen)
             foreach (var police in Police.Values.ToArray()) TryCapture(police);
@@ -275,6 +305,8 @@ internal sealed class Engine
             if (police.Ordinary != null || police.Seducible != null || police.Chief != null)
             {
                 Police[id] = police;
+                var probe = new DodgeAnimation(); probe.Prepare(owner.anim ?? owner.GetComponent<Animator>(), owner.patrolMovement?.RunSpeed ?? 3.5f);
+                police.Visual.Glow(owner, Options.Red, Options.RedIntensity.Value); police.Visual.ClearGlow();
                 Plugin.Log.LogInfo($"[Police] registered id={id} name={owner.name} catchDistance={owner.catchDistance:F3}");
             }
         }
@@ -309,8 +341,9 @@ internal sealed class Engine
         direction.y = 0;
         if (direction.sqrMagnitude < .0001f) { direction = Character.transform.forward; direction.y = 0; }
         if (direction.sqrMagnitude < .0001f) return false;
-        DodgeSettings = settings; DodgeDirection = direction.normalized; DodgeElapsed = 0; ProtectionUsed = false;
+        DodgeSettings = settings; DodgeDirection = direction.normalized; DodgeElapsed = 0; ProtectionUsed = false; PerfectFlashRemaining = 0;
         DodgeNumber = ++nextAction; DodgePhase = Rules.Phase(0, settings); dodgeOrigin = Character.transform.position;
+        if (DodgePhase == DodgePhase.Dash) DodgeAnimation.Play(DodgeNumber);
         Character.mainCharStateControl.CurrentStamina = stamina - settings.Cost;
         DodgeVisual.Glow(Character, Options.White, Options.WhiteIntensity.Value);
         Plugin.Log.LogInfo($"[Dodge #{DodgeNumber}] start stamina={stamina:F2}->{stamina-settings.Cost:F2} dir={DodgeDirection} speed={settings.Speed:F2} native-run={DodgeAnimation.BaseRunSpeed:F3} global-run-scale={DodgeAnimation.GlobalMultiplier:F3} dodge-scale={Options.Speed.Value:F3} startup={settings.Startup:F3} dash={settings.Dash:F3} recovery={settings.Recovery:F3} recovery-scale={settings.RecoveryScale:F3} window=[{settings.WindowStart:F3},{settings.WindowEnd:F3})");
@@ -318,41 +351,59 @@ internal sealed class Engine
     }
     internal void AdvanceDodge(float dt)
     {
+        if (PerfectFlashRemaining > 0)
+        {
+            PerfectFlashRemaining = Math.Max(0, PerfectFlashRemaining - dt);
+            if (PerfectFlashRemaining == 0 && DodgePhase is DodgePhase.Ready or DodgePhase.Recovery) DodgeVisual.ClearGlow();
+        }
         if (DodgePhase == DodgePhase.Ready) return;
         DodgeElapsed += dt;
         var phase = Rules.Phase(DodgeElapsed, DodgeSettings);
         if (phase != DodgePhase)
         {
             Plugin.Log.LogInfo($"[Dodge #{DodgeNumber}] phase={phase} elapsed={DodgeElapsed:F3}"); DodgePhase = phase;
-            if (phase == DodgePhase.Dash) DodgeAnimation.Play(DodgeNumber);
-            else
-            {
-                bool wasAnimating = DodgeAnimation.Active;
-                DodgeAnimation.Stop();
-                if (wasAnimating && Character != null) Character._pendingRootMotionLocalDelta = Vector3.zero;
-            }
-            if (phase == DodgePhase.Recovery) DodgeVisual.ClearGlow();
+            if (phase == DodgePhase.Dash && DodgeElapsed < DodgeSettings.AnimationSeconds) DodgeAnimation.Play(DodgeNumber);
+            if (phase == DodgePhase.Recovery && !DodgeAnimation.Active && PerfectFlashRemaining <= 0) DodgeVisual.ClearGlow();
             if (phase == DodgePhase.Ready) StopDodge("complete");
+        }
+        if (DodgeAnimation.Active && DodgeElapsed >= DodgeSettings.AnimationSeconds)
+        {
+            DodgeAnimation.Stop(alignRunning: true);
+            if (PerfectFlashRemaining <= 0) DodgeVisual.ClearGlow();
+            if (Character != null) Character._pendingRootMotionLocalDelta = Vector3.zero;
         }
     }
     internal bool Protect(CaptureAction action)
     {
         if (DodgePhase != DodgePhase.Dash || ProtectionUsed || !Rules.Window(DodgeElapsed, DodgeSettings)) return false;
         ProtectionUsed = true;
-        Plugin.Log.LogInfo($"[Capture #{action.Number}] perfect-dodge #{DodgeNumber} elapsed={DodgeElapsed:F3}; one instance consumed");
+        PerfectFlashRemaining = .3f;
+        DodgeVisual.SetGlow(Options.Pink, 1, .8f);
+        if (Character?.mainCharStateControl != null)
+        {
+            var state = Character.mainCharStateControl;
+            state.CurrentStamina = Math.Min(state.MaxStamina, state.CurrentStamina + DodgeSettings.Cost);
+        }
+        // Successful perfect contact keeps the remaining burst but skips recovery.
+        float skippedRecovery = DodgeSettings.Recovery;
+        DodgeSettings = DodgeSettings with { Recovery = 0 };
+        LastStatus = "完美闪避：取消恢复阶段";
+        Plugin.Log.LogInfo($"[Capture #{action.Number}] perfect-dodge #{DodgeNumber} elapsed={DodgeElapsed:F3}; skipped-recovery={skippedRecovery:F3}s; remaining-dash={Math.Max(0, DodgeSettings.Startup + DodgeSettings.Dash - DodgeElapsed):F3}s; one instance consumed");
         return true;
     }
     internal void StopDodge(string reason)
     {
         bool wasAnimating = DodgeAnimation.Active;
-        DodgeAnimation.Stop();
+        DodgeAnimation.Stop(alignRunning: reason == "complete");
         if (wasAnimating && Character != null) Character._pendingRootMotionLocalDelta = Vector3.zero;
         if (DodgePhase != DodgePhase.Ready || DodgeVisual.HasGlow)
         {
             float distance = Character != null ? Vector3.Distance(dodgeOrigin, Character.transform.position) : 0;
             Plugin.Log.LogInfo($"[Dodge #{DodgeNumber}] end reason={reason} elapsed={DodgeElapsed:F3} actual-distance={distance:F3}");
         }
-        DodgePhase = DodgePhase.Ready; DodgeVisual.Clear();
+        DodgePhase = DodgePhase.Ready;
+        if (reason == "complete" && PerfectFlashRemaining > 0) DodgeVisual.ClearLines();
+        else { PerfectFlashRemaining = 0; DodgeVisual.Clear(); }
     }
 
     private bool PoliceAvailable(Police police)
@@ -364,7 +415,7 @@ internal sealed class Engine
     }
     internal bool TryCapture(Police police)
     {
-        if (Captures.ContainsKey(police.Id)) return false;
+        if (Captures.ContainsKey(police.Id) || captureCooldowns.ContainsKey(police.Id)) return false;
         var owner = police.Owner;
         string? reason = null;
         if (Character == null || World == null || arrestCommitted || !CaptureEnabled) return false;
@@ -372,7 +423,10 @@ internal sealed class Engine
         else if (!police.Chasing) reason = "not-chasing";
         else if (owner.traceTarget == null || !IsPlayer(owner.traceTarget)) reason = "target-is-not-player";
         else if (!police.HasArrest) reason = "native-arrest-listener-missing";
-        var settings = Options.Capture();
+        if (reason != null) capturePlans.Remove(police.Id);
+        else if (!capturePlans.ContainsKey(police.Id))
+            capturePlans[police.Id] = Rules.ChooseCapture(UnityEngine.Random.value, Options.HeavyChance.Value);
+        var settings = Options.Capture(capturePlans.TryGetValue(police.Id, out var plan) ? plan : CaptureKind.Light);
         if (reason == null && !InSector(owner!.transform.position, owner.transform.forward, settings.TriggerRadius, settings.TriggerAngle, settings.Height, out _, out _, out _)) reason = "outside-start-sector";
         if (reason == null && Occluded(owner!, settings)) reason = "occluded";
         if (reason != null)
@@ -389,10 +443,19 @@ internal sealed class Engine
 
     internal CaptureAction StartCapture(Police police, Character target, CaptureSettings settings)
     {
+        Police.TryAdd(police.Id, police);
+        ChaseSpeed.Restore(police.Id);
         var owner = police.Owner;
-        var action = new CaptureAction { Police = police, Target = target, Settings = settings, Number = ++nextAction,
+        capturePlans.Remove(police.Id);
+        var action = new CaptureAction { Police = police, Visual = police.Visual, Target = target, Settings = settings, Number = ++nextAction,
             Direction = Vector3.ProjectOnPlane(owner.transform.forward, Vector3.up).normalized,
+            LastSeenPosition = target.transform.position,
             Rotation = owner.transform.rotation, Animator = owner.anim ?? owner.GetComponent<Animator>(), Agent = owner.agent ?? owner.GetComponent<NavMeshAgent>() };
+        if (settings.MoveScale > 0 && Character != null)
+        {
+            var speedProbe = new DodgeAnimation(); speedProbe.Prepare(Character);
+            action.MoveSpeed = speedProbe.ScaledRunSpeed * Options.ChaseSpeedRatio.Value * settings.MoveScale;
+        }
         if (action.Animator != null)
         {
             action.WasRootMotion = action.Animator.applyRootMotion;
@@ -413,9 +476,16 @@ internal sealed class Engine
             action.Agent.isStopped = true; action.Agent.updateRotation = false; action.Agent.velocity = Vector3.zero;
         }
         Captures.Add(police.Id, action);
+        if (settings.MoveScale > 0 && action.Animator != null)
+        {
+            action.Animator.enabled = action.WasAnimatorEnabled;
+            action.Animator.applyRootMotion = false;
+            action.RunAnimation.Prepare(action.Animator, owner.patrolMovement?.RunSpeed ?? 3.5f);
+            action.RunAnimation.Play(action.Number);
+        }
         action.Visual.Glow(owner, Options.Red, Options.RedIntensity.Value);
         Animations.Attempt(action, false);
-        Plugin.Log.LogInfo($"[Capture #{action.Number}] start police={police.Id} name={owner.name} windup={settings.Windup:F3} commit={settings.CommitAt:F3} radius={settings.Radius:F3} full-angle={settings.Angle:F1}");
+        Plugin.Log.LogInfo($"[Capture #{action.Number}] start kind={settings.Kind} police={police.Id} name={owner.name} windup={settings.Windup:F3} commit={settings.CommitAt:F3} radius={settings.Radius:F3} full-angle={settings.Angle:F1} move-speed={action.MoveSpeed:F3}");
         return action;
     }
     internal void AdvanceCapture(CaptureAction action, float dt)
@@ -434,11 +504,15 @@ internal sealed class Engine
             return;
         }
         float before = action.Elapsed;
-        action.Elapsed += dt;
+        action.Elapsed = Math.Min(action.Elapsed + dt, action.Settings.Windup);
         float turningTime = Math.Max(0, Math.Min(action.Elapsed, action.Settings.CommitAt) - Math.Min(before, action.Settings.CommitAt));
+        bool visible = action.Settings.MoveScale == 0 ||
+            (InSector(owner.transform.position, action.Direction, float.MaxValue, 120, action.Settings.Height, out _, out _, out _) && !Occluded(owner, action.Settings));
+        if (visible) action.LastSeenPosition = action.Target.transform.position;
+        if (!visible && action.Settings.Kind == CaptureKind.Light) turningTime = 0;
         if (turningTime > 0)
         {
-            var delta = action.Target.transform.position - owner.transform.position; delta.y = 0;
+            var delta = action.LastSeenPosition - owner.transform.position; delta.y = 0;
             if (delta.sqrMagnitude > .0001f)
                 action.Rotation = Quaternion.RotateTowards(action.Rotation, Quaternion.LookRotation(delta.normalized), action.Settings.TurnSpeed * turningTime);
             owner.transform.rotation = action.Rotation;
@@ -446,12 +520,16 @@ internal sealed class Engine
         }
         if (action.Elapsed >= action.Settings.CommitAt && action.Phase == CapturePhase.Windup)
         { action.Phase = CapturePhase.Committed; Plugin.Log.LogInfo($"[Capture #{action.Number}] committed elapsed={action.Elapsed:F3} dir={action.Direction}"); }
+        MoveCapture(action, Math.Max(0, action.Elapsed - before));
         if (action.Elapsed < action.Settings.Windup) return;
         bool inside = InSector(owner.transform.position, action.Direction, action.Settings.Radius, action.Settings.Angle,
             action.Settings.Height, out float distance, out float angle, out float height);
         bool occluded = inside && Occluded(owner, action.Settings);
         bool perfect = inside && !occluded && Protect(action);
+        string perfectReason = perfect ? "success" : !inside ? "outside-hit-sector" : occluded ? "occluded" :
+            ProtectionUsed ? "already-consumed" : DodgePhase != DodgePhase.Dash ? "not-dashing" : "outside-time-window";
         Plugin.Log.LogInfo($"[Capture #{action.Number}] resolve distance={distance:F3} angle={angle:F2} height={height:F3} inside={inside} occluded={occluded} perfect={perfect} elapsed={action.Elapsed:F3}");
+        Plugin.Log.LogInfo($"[Capture #{action.Number}] perfect-reason={perfectReason} dodge-phase={DodgePhase} dodge-elapsed={DodgeElapsed:F3} window=[{DodgeSettings.WindowStart:F3},{DodgeSettings.WindowEnd:F3})");
         action.Visual.ClearGlow();
         if (inside && !occluded && !perfect)
         {
@@ -464,9 +542,54 @@ internal sealed class Engine
             Plugin.Log.LogWarning($"[Capture #{action.Number}] native callback disappeared; treating as miss");
         }
         action.Phase = CapturePhase.Recovery; action.RecoveryElapsed = 0;
+        action.RunAnimation.Stop();
+        if (action.Animator != null) action.Animator.enabled = false;
         Animations.Attempt(action, true);
-        LastStatus = "抓捕落空 #" + action.Number;
+        LastStatus = perfect ? "完美闪避：取消恢复阶段" : "抓捕落空 #" + action.Number;
         Plugin.Log.LogInfo($"[Capture #{action.Number}] miss recovery={action.Settings.Recovery:F3}");
+    }
+
+    private void MoveCapture(CaptureAction action, float dt)
+    {
+        var agent = action.Agent;
+        if (dt <= 0 || action.MoveSpeed <= 0 || agent == null || !agent.isActiveAndEnabled || !agent.isOnNavMesh) return;
+        var owner = action.Police.Owner;
+        // Small steps retain wall and body contact even on a long game frame.
+        float travel = action.MoveSpeed * dt;
+        int steps = Math.Max(1, (int)Math.Ceiling(travel / .06f));
+        float radius = Math.Max(.05f, agent.radius);
+        float gap = radius + (action.Target.Motor != null ? action.Target.Motor.CapsuleRadius : .3f);
+        for (int i = 0; i < steps; i++)
+        {
+            Vector3 start = owner.transform.position, delta = action.Direction * (travel / steps);
+            // Body contact is geometric, independent of whether player/NPC colliders
+            // happen to be enabled by the game's character controller.
+            Vector3 relative = start - action.Target.transform.position; relative.y = 0;
+            Vector3 next = relative + delta;
+            if (Math.Abs(start.y - action.Target.transform.position.y) <= action.Settings.Height && next.magnitude < gap)
+            {
+                float projection = Vector3.Dot(relative, delta.normalized);
+                float discriminant = projection * projection - (relative.sqrMagnitude - gap * gap);
+                float allowed = discriminant >= 0 ? Math.Max(0, -projection - MathF.Sqrt(discriminant)) : 0;
+                delta = delta.normalized * Math.Min(delta.magnitude, allowed);
+            }
+            int mask = action.Settings.ObstacleMask == -1 ? (int)owner.obstacleMask : action.Settings.ObstacleMask;
+            if (mask != 0 && delta.sqrMagnitude > .000001f)
+            {
+                int count = Physics.CapsuleCastNonAlloc(start + Vector3.up * (radius + .05f),
+                    start + Vector3.up * Math.Max(radius + .05f, agent.height - radius), radius,
+                    delta.normalized, captureHits, delta.magnitude, mask, QueryTriggerInteraction.Ignore);
+                if (count == captureHits.Length) delta = Vector3.zero;
+                for (int hitIndex = 0; hitIndex < count; hitIndex++)
+                {
+                    var hit = captureHits[hitIndex];
+                    if (hit.collider == null || hit.collider.transform.IsChildOf(owner.transform) || hit.collider.transform.IsChildOf(action.Target.transform)) continue;
+                    delta = delta.normalized * Math.Min(delta.magnitude, Math.Max(0, hit.distance - .01f));
+                }
+            }
+            agent.Move(delta);
+            owner.transform.position = agent.nextPosition;
+        }
     }
     internal bool InSector(Vector3 origin, Vector3 direction, float radius, float fullAngle, float maxHeight,
         out float distance, out float angle, out float height)
@@ -495,28 +618,37 @@ internal sealed class Engine
     }
     internal void LateTick()
     {
+        ChaseSpeed.Tick(this);
         DodgeAnimation.Pause(RuntimeHost.PanelOpen || Time.timeScale <= 0);
         foreach (var action in Captures.Values.ToArray())
         {
+            action.RunAnimation.Pause(RuntimeHost.PanelOpen || Time.timeScale <= 0);
+            if (action.Phase != CapturePhase.Recovery) action.Visual.SetGlow(Options.Red, Options.RedIntensity.Value,
+                weight: Presentation.FadeWeight(action.Settings.Windup - action.Elapsed));
             if (action.Police.Owner == null) continue;
             action.Police.Owner.transform.rotation = action.Rotation;
             if (action.Animator != null)
             {
-                if (action.AnimationPlayed) action.Animator.applyRootMotion = false;
+                if (action.AnimationPlayed || action.RunAnimation.Active) action.Animator.applyRootMotion = false;
                 else action.Animator.enabled = false;
             }
             if (action.Agent != null && action.Agent.isActiveAndEnabled && action.Agent.isOnNavMesh)
             { action.Agent.isStopped = true; action.Agent.updateRotation = false; action.Agent.velocity = Vector3.zero; }
-            if (Options.Debug.Value) action.Visual.Sector(action.Police.Owner.transform.position, action.Direction, action.Settings);
+            if (Options.ShowAttackRange.Value && action.Phase != CapturePhase.Recovery)
+                action.Visual.Sector(action.Police.Owner.transform.position, action.Direction, action.Settings, false, action.Police.Owner.transform);
             else action.Visual.ClearLines();
         }
         if (Character == null) return;
-        if (DodgePhase is DodgePhase.Startup or DodgePhase.Dash)
+        if (PerfectFlashRemaining > 0)
         {
-            bool window = DodgePhase == DodgePhase.Dash && !ProtectionUsed && Rules.Window(DodgeElapsed, DodgeSettings);
-            float brightness = window ? Options.WindowIntensity.Value : Options.WhiteIntensity.Value *
-                (.35f + .65f * Math.Abs(MathF.Sin(DodgeElapsed * Options.BlinkHz.Value * MathF.PI)));
-            DodgeVisual.SetGlow(Options.White, brightness);
+            // Preserve pink chroma: HDR multiplication formerly pushed RGB toward white.
+            DodgeVisual.SetGlow(Options.Pink, 1, .8f, Presentation.FadeWeight(PerfectFlashRemaining));
+        }
+        else if (DodgePhase is DodgePhase.Startup or DodgePhase.Dash || DodgeAnimation.Active)
+        {
+            float remaining = Math.Min(DodgeSettings.AnimationSeconds,
+                DodgeSettings.Startup + DodgeSettings.Dash + DodgeSettings.Recovery) - DodgeElapsed;
+            DodgeVisual.SetGlow(Options.White, Options.WhiteIntensity.Value, weight: Presentation.FadeWeight(remaining));
         }
         if (Options.Debug.Value && DodgePhase != DodgePhase.Ready)
             DodgeVisual.Direction(Character.transform.position, DodgeDirection, DodgeSettings.Speed * DodgeSettings.Dash);
@@ -525,8 +657,11 @@ internal sealed class Engine
     internal void EndCapture(CaptureAction action, string reason)
     {
         Captures.Remove(action.Police.Id); action.Visual.Clear();
+        action.RunAnimation.Stop();
+        if (reason == "miss-recovery-complete") captureCooldowns[action.Police.Id] = action.Settings.Cooldown;
         if (action.Animator != null)
         {
+            action.Animator.applyRootMotion = action.WasRootMotion;
             if (action.AnimationPlayed)
             {
                 action.Animator.applyRootMotion = action.WasRootMotion;
@@ -550,7 +685,10 @@ internal sealed class Engine
     internal void ClearCaptures(string reason) { foreach (var action in Captures.Values.ToArray()) EndCapture(action, reason); }
     internal void Reset(string reason)
     {
-        ClearCaptures(reason); StopDodge(reason); Police.Clear(); lastRejection.Clear(); nextScan = 0;
+        ChaseSpeed.Reset();
+        foreach (var police in Police.Values) police.Visual.Dispose();
+        DodgeVisual.Dispose();
+        ClearCaptures(reason); StopDodge(reason); Police.Clear(); lastRejection.Clear(); capturePlans.Clear(); captureCooldowns.Clear(); nextScan = 0;
         arrestCommitted = false;
     }
 }

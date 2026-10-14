@@ -1,0 +1,14 @@
+diff --git a/src/ItemSpawnMod/MovementScaling.cs b/src/ItemSpawnMod/MovementScaling.cs
+--- a/src/ItemSpawnMod/MovementScaling.cs
++++ b/src/ItemSpawnMod/MovementScaling.cs
+@@ -21 +21 @@
+-        ConfigEntry<double> Bind(string key, string description)
++        ConfigEntry<double> Bind(string key, string description, double defaultValue = 1d)
+@@ -23,2 +23,2 @@
+-            var entry = plugin.Config.Bind("Movement", key, 1d, new ConfigDescription(description, range));
+-            if (!GameplayScaling.IsValid(entry.Value)) entry.Value = 1d;
++            var entry = plugin.Config.Bind("Movement", key, defaultValue, new ConfigDescription(description, range));
++            if (!GameplayScaling.IsValid(entry.Value)) entry.Value = defaultValue;
+@@ -28 +28 @@
+-        RunSpeed = Bind("RunSpeedMultiplier", "主角跑动及警察追击速度倍率；巡逻不受影响。1 为原速，0 停止对应位移。");
++        RunSpeed = Bind("RunSpeedMultiplier", "主角跑动及警察追击速度倍率；巡逻不受影响。1 为原速，0 停止对应位移。", 1.5d);

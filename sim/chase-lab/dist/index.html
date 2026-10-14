@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lillia · 追逐实验室</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><div class="brand"><span class="mark">L / C</span><div><h1>追逐实验室</h1><p>LILLIA · WHITE-BOX CHASE LAB</p></div></div><div class="baseline"><span>原生跑速 <b>3.143 m/s</b></span><span>全局倍率 <b>×2 固定</b></span><span>街宽 <b>12.57 m</b></span></div><span class="tag">本地研究原型 · 120 Hz</span></header>
+<main>
+<aside class="panel settings"><div class="section-head"><h2>实验条件</h2><span id="dirty">已应用</span></div>
+<label>参数方案<select id="preset"><option value="candidate">候选起点 · 四种出刀</option><option value="legacy">0.1.3 · 几何复刻基线</option></select></label>
+<p class="hint">迭代顺序：玩家手感 → 单策略反制 → 混合压力。预设仅代表标注范围内的验证，不代表真人平衡通过。</p>
+<p id="preset-evidence" class="hint"></p><p id="preset-check" class="hint"></p>
+<button id="try-preset" class="primary full">载入原始预设并重开</button>
+<p id="player-readout" class="hint"></p>
+<p id="ai-intent" class="hint"></p>
+<p id="search-state" class="hint"></p>
+<p id="attack-gate" class="hint"></p>
+<div id="drill-controls" hidden>
+<h3>单元场景条件</h3>
+<label>入口<select id="drill-entry"><option value="attack">固定近距，立即出刀</option><option value="recovery">已落空，直接后摇</option></select></label>
+<label>抓捕动作<select id="drill-mode"><option value="stand">贴身站定</option><option value="stride">直线行进</option><option value="sweep">定向横扫</option><option value="lunge">承诺扑抓</option></select></label>
+<label>固定应对<select id="drill-response"><option value="early">前摇开始即早闪</option><option value="perfect">固定时序完美尝试</option><option value="late">迟闪失败对照</option><option value="none">不闪，仅侧移</option><option value="spiral">不闪，螺旋贴近绕行</option></select></label>
+<label>后摇绕行<select id="drill-exit"><option value="same">同侧绕后</option><option value="cross">背后换侧</option><option value="circle">近身绕一圈</option></select></label>
+<label>起始侧<select id="drill-side"><option value="1">右侧</option><option value="-1">左侧</option></select></label>
+<label>后摇移动<select id="drill-walk"><option value="true">步行回体</option><option value="false">跑动／声音风险</option></select></label>
+<p class="hint">修改后应用。脚本不模拟人类反应，不选择逃跑路线；直接后摇入口不能证明闪避成功。</p>
+</div>
+<label>地图布局<select id="map-layout"><option value="ring">回字 · 单中央街区</option><option value="grid">田字 · 历史四街区</option></select></label><label>出生位置<select id="spawn"><option value="street">直线街道</option><option value="junction">弯道／路口</option><option value="corner">转角附近</option><option value="random">三场景随机</option></select></label>
+<label>控制方式<select id="policy"><option value="adaptive">AI · 玩家倾向 / 学习</option><option value="retreat">AI · 无资源后撤</option><option value="footwork">AI · 无资源绕身</option><option value="reactive">AI · 见红后撤闪避</option><option value="anticipate">AI · 接近时预判</option><option value="perfect">AI · 目押完美</option><option value="manual">玩家 · WASD / Space</option></select></label>
+<div id="parameters"></div>
+<details><summary>每种出刀性能</summary><div id="attacks"></div></details>
+<details><summary>全部参数 / JSON</summary><p class="hint">修改后应用。原生跑速、全局倍率和街宽不在可调项中。体力与感知属于模拟假设。</p><textarea id="json" rows="12" spellcheck="false"></textarea><button id="read-json">读取 JSON 到草稿</button></details>
+<button id="apply" class="primary full">应用草稿并重开</button>
+<div class="row"><button id="export-config">导出参数</button><label class="file-button">导入参数<input type="file" id="import-config" accept="application/json"></label></div>
+<p id="message" role="status" class="hint">所有修改在重开后生效；不影响游戏插件。</p>
+</aside>
+<section class="stage-area">
+<div class="toolbar"><div><label class="seed-control">种子<input id="seed" type="number" value="42" min="0" max="4294967295" step="1" title="修改后按Enter或点击重开"></label><button id="start">▶ 开始</button><button id="pause">暂停</button><button id="step">单步</button><button id="takeover" aria-pressed="false">玩家接管</button><button id="zoom" class="accent" aria-pressed="true">局部放大</button></div><label>速度<select id="speed"><option value=".25">0.25×</option><option value=".5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label></div>
+<div class="canvas-wrap"><canvas id="arena" tabindex="0" aria-label="街道追逐场景，WASD移动，空格闪避"></canvas><div class="stage-label"><span id="run-label">候选起点</span><small id="map-label">俯视 · 米制 · 回字单街区</small></div><div id="overlay" class="overlay"><b>准备开始</b><span>先观察 AI，可在控制方式中切换玩家</span></div><div class="legend"><span class="cyan">● 主角</span><span class="orange">● 警察</span><span>红：前摇 / 命中范围</span><span>白：闪避 / 完美窗口</span></div></div>
+<div class="telemetry"><div><small>本轮状态</small><b id="state">准备</b></div><div><small>追逐时间</small><b id="time">0.00 s</b></div><div><small>双方距离</small><b id="distance">—</b></div><div><small>有效躲过 / 完美</small><b id="evades">0 / 0</b></div><div><small>综合得分</small><b id="score">0</b></div></div>
+<div class="resources"><div><span>主角体力 <b id="p-stamina"></b></span><meter id="p-meter" min="0" max="100"></meter></div><div><span>警察体力 <b id="e-stamina"></b></span><meter id="e-meter" min="0" max="100"></meter></div><div><span>断视线记忆 <b id="memory"></b></span><meter id="memory-meter" min="0" max="1"></meter></div></div>
+<div class="under-stage"><div><h3>操作与判定</h3><p>WASD / 方向键移动 · Space 闪避 · Shift 步行回体 · E 隐身（技能实验预设） · P 暂停。切换控制方式会暂停，点击继续保留进度；开始按钮在对局中或结束后会重开。光环增强只代表短暂完美窗口。</p><p class="hint">低暴露优先断追，高暴露优先多轮躲避。青色虚线为AI下一路点；墙体阻挡移动及视线。警察头顶眼睛：目视／丢视／搜索；耳朵：刚收到有效声音线索才亮起，灰色代表没有新声音，并非没有声音记忆。</p></div><div><h3>可复现回放</h3><button id="export-replay">导出当前回放</button><label class="file-button">载入回放<input type="file" id="import-replay" accept="application/json"></label><p class="hint">包含种子、参数、逐次输入和事件；可暂停、单步或中途接管。</p></div></div>
+<section class="panel experiments"><div class="section-head"><h2>批量对局与参数搜索</h2><span>后台 Worker · 不阻塞操作</span></div><p class="hint">固定低 / 高暴露，比较均匀混合与四种 80% 偏科。自适应 AI 从实际见到的出刀估计频率；已知偏科对照单独标记。均匀随机不等于 GTO。</p>
+<div class="experiment-controls"><label>每格种子<input id="samples" type="number" value="12" min="2" max="128"></label><label>搜索候选<input id="candidates" type="number" value="8" min="2" max="64"></label><button id="batch" class="primary">测试当前配置</button><button id="train">后期：搜索参数 + 验证</button><button id="cancel" disabled>停止实验</button></div>
+<label class="hint"><input id="full-matrix" type="checkbox">扩展为三档反应、两档暴露、混合与80%偏科全矩阵（会覆盖草稿权重）</label><p class="hint">默认仅对照当前玩家能力、暴露度和出刀权重；比较七种玩家策略，随机出生场景。参数搜索始终使用全矩阵，仅留作后期工具。</p>
+<progress id="progress" value="0" max="1"></progress><p id="progress-label" class="hint">尚未运行。参数搜索寻找目标，不保证目标可达。</p><div id="report"></div><div class="row"><button id="export-report" disabled>导出完整报告</button><button id="use-trained" disabled>载入最佳候选到草稿</button></div></section>
+</section>
+<aside class="panel inspector"><div class="section-head"><h2>白盒观察</h2><span class="live-dot">LIVE</span></div><h3>动作时序</h3><div id="timeline"></div><h3>已观察出刀</h3><div id="frequencies"></div><h3>事件记录</h3><div id="events" class="events"></div><details open><summary>模型边界</summary><p class="hint">单警察，二维固定步长。原生跑速和全局倍率固定。主角体力、警察续航、感知记忆、转向与碰撞是可调整的近似；不声称复刻 Unity 全部行为。</p><p class="hint">机器人逐次反应延迟、决策频率与操作误差可调，只能看到延迟后的可见状态。白盒面板可看真实状态，玩家实测结果单独导出。</p></details></aside>
+</main><script type="module" src="app.mjs"></script></body></html>

@@ -1,10 +1,12 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { POLICIES } from './dist/bots.mjs';
+import { PRESETS } from './dist/presets.mjs';
 const args = process.argv.slice(2), flag = (k, fallback) => { const i = args.indexOf(`--${k}`); return i < 0 ? fallback : args[i + 1]; };
 const port = Number(flag('debug-port', 9222)), seed = Number(flag('seed', 42)), steps = Math.min(36000, Math.max(0, Number(flag('steps', 600)))), policy = flag('policy', 'adaptive');
 if (!Number.isInteger(port) || port < 1 || port > 65535 || !Number.isFinite(seed) || !Number.isFinite(steps) || !POLICIES[policy]) throw new Error('Invalid capture arguments');
-const localURL = `http://127.0.0.1:4173/?preset=candidate&seed=${seed}&steps=${steps}&policy=${encodeURIComponent(policy)}`;
+const preset=flag('preset','candidate');if(!PRESETS.some(p=>p.id===preset))throw new Error('Unknown preset');
+const localURL = `http://127.0.0.1:4173/?preset=${encodeURIComponent(preset)}&seed=${seed}&steps=${steps}&policy=${encodeURIComponent(policy)}`;
 const output = path.resolve(flag('output', '../../artifacts/chase-lab/checkpoint.png'));
 let ws, targetId, sessionId, nextId = 0; const pending = new Map(), errors = [];
 function call(method, params = {}, session = null) {
@@ -35,6 +37,7 @@ try {
     if (value.result.value) { ready = true; break; }
   }
   if (!ready || errors.length) throw new Error(errors.join('; ') || 'Simulation page did not become ready');
+  if(flag('view','local')==='full')await call('Runtime.evaluate',{expression:'if(document.querySelector("#zoom").getAttribute("aria-pressed")==="true")document.querySelector("#zoom").click()'},sessionId);
   const result = await call('Page.captureScreenshot', { format: 'png' }, sessionId);
   await mkdir(path.dirname(output), { recursive: true }); await writeFile(output, Buffer.from(result.data, 'base64'));
   console.log(JSON.stringify({ screenshot: output, seed, steps, policy, browserLaunched: false, backgroundTab: true }));

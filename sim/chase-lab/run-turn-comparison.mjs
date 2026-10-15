@@ -1,10 +1,11 @@
+import { metres as M, BASE } from './dist/units.mjs';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {World} from './dist/core.mjs';
 import {presetConfig} from './dist/presets.mjs';
 const rows=[],configs={};
 for(const rate of [180,300,360,420,540,720]){
  const c=presetConfig('rhythm-charge');c.mapLayout='grid';c.capture.lunge.turnRate=rate;configs[rate]=c;
- for(const gap of [.7,1.2,2,c.capture.lunge.trigger])for(const onset of [0,.1,.2,.3,.4])for(const style of ['side','orbit','spiral'])for(const side of [-1,1]){
+ for(const gap of [M(.7),M(1.2),M(2),c.capture.lunge.trigger])for(const onset of [0,.1,.2,.3,.4])for(const style of ['side','orbit','spiral'])for(const side of [-1,1]){
   const w=new World(c,7);Object.assign(w.police,{x:0,y:0,dir:0,moveDir:0});Object.assign(w.player,{x:gap,y:0});w.startAttack('lunge');
   while(!w.result&&w.time<c.capture.lunge.windup){
    const t=Math.atan2(w.player.y-w.police.y,w.player.x-w.police.x),r=style==='spiral'?-.4:0;

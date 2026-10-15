@@ -6,6 +6,7 @@
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
     "bench": "node cli.mjs bench",
-    "train": "node cli.mjs train"
+    "train": "node cli.mjs train",
+    "test:historical": "node --test tests/historical/*.test.mjs"
   }
 }

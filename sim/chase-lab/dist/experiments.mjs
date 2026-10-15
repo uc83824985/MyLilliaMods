@@ -1,6 +1,7 @@
 import { World, clone, MODES, RNG } from './core.mjs';
 import { Bot, POLICIES } from './bots.mjs';
 import { drillInput } from './drills.mjs';
+import { mirrorInput } from './mirrors.mjs';
 export const DISTRIBUTIONS = {
   mixed: { stand: 1, stride: 1, sweep: 1, lunge: 1 },
   stand80: { stand: 8, stride: .667, sweep: .667, lunge: .666 },
@@ -12,12 +13,18 @@ export function episode(config, seed, policy, knownMode = null, record = false) 
   const world = new World(config, seed), bot = new Bot(config, seed, policy, knownMode), inputs = [];
   let previous = '';
   while (!world.result) {
-    const input = config.drill ? drillInput(world) : bot.action(world);
+    const input = config.mirror ? mirrorInput(world) : config.drill ? drillInput(world) : bot.action(world);
     if (record) { const str = JSON.stringify(input); if (str !== previous) { inputs.push({ tick: world.tick + 1, input }); previous = str; } }
     world.step(input);
   }
   const mean = bot.delays.reduce((a, b) => a + b, 0) / Math.max(1, bot.delays.length), std = Math.sqrt(bot.delays.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, bot.delays.length));
-  return { ...world.summary(), reaction: { mean, std }, observedModes: bot.counts, ...(record ? { replay: { version: 1, config, seed, endTick: world.tick, inputs, events: world.events } } : {}) };
+  const caught=world.events.find(e=>e.type==='caught'),plan=caught&&bot.timingPlans?.find(p=>p.id===caught.id);
+  const unpressed=!!caught&&!caught.dodgeSinceAttack;
+  const cause=!unpressed?null:caught.playerPhase!=='ready'?'action-locked':plan?.choice==='spin'?'deliberate-footwork':plan?.lapse?'lapse':!plan||plan.observedElapsed>=plan.windup?'late-observation':plan.targetElapsed>=plan.windup?'late-target':plan.pressedAt===undefined?'decision-cadence-or-eligibility':'input-rejected';
+  const timingAudit=config.duel?{observed:bot.timingPlans.length,latePlans:bot.timingPlans.filter(p=>p.targetElapsed>=p.windup).length,
+    caughtWithoutInput:!!caught&&!world.events.some(e=>e.type==='dodge'&&e.tick>=(world.events.find(a=>a.type==='attack'&&a.id===caught.id)?.tick??0)),
+    enoughStaminaNoDodge:!!caught?.staminaEnough&&unpressed,enoughStaminaReadyNoDodge:!!caught?.staminaEnough&&unpressed&&caught.playerPhase==='ready',unpressedCause:cause,finalPlan:plan??null}:undefined;
+  return { ...world.summary(), reaction: { mean, std }, observedModes: bot.counts,...(timingAudit?{timingAudit}:{}), ...(record ? { replay: { version: 1, config, seed, endTick: world.tick, inputs, events: world.events } } : {}) };
 }
 export function wilson(success, n) {
   if (!n) return [0, 1]; const z = 1.96, p = success / n, d = 1 + z * z / n, a = (p + z * z / (2 * n)) / d, b = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d; return [a - b, a + b];
@@ -29,6 +36,7 @@ export function aggregate(rows) {
 }
 export function* suite(config, { seeds = 16, seedBase = 1000, policies = Object.keys(POLICIES), distributions = DISTRIBUTIONS, exposures = [.15, .85], profiles = ['configured', 'fast', 'slow'] } = {}) {
   if (config.practice) throw new Error('无追兵练习不能用于胜率对照或参数搜索');
+  if (config.mirror) throw new Error('镜子单元使用 run-mirrors.mjs，不能混入完整追逐胜率');
   if (config.drill) throw new Error('单元场景使用 run-drills.mjs；不能混入完整追逐胜率或参数搜索');
   const report = { version: 1, config: clone(config), seeds, seedBase, cells: [], assumptions: ['固定 120Hz；二维根位置判定', '逐次正态反应延迟截断在25–1000ms，决策Hz可调；非真人统计', 'fast=120±15ms/2°误差；slow=280±60ms/8°误差；configured使用草稿', '感知/体力/碰撞为明确标注的近似模型', '每种混合策略逐次出手采样；随机不代表GTO'] };
   const total = profiles.length * exposures.length * Object.keys(distributions).length * policies.length * seeds; let done = 0;

@@ -1,34 +1,19 @@
+import { metres as M } from '../dist/units.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World,RUN,validate,DEFAULT,clone,dist} from '../dist/core.mjs';
 import {presetConfig} from './geometry-fixture.mjs';
 import {drillInput} from '../dist/drills.mjs';
 import {perceptionCue} from '../dist/perception.mjs';
-function attack(mode){const w=new World(presetConfig('rhythm'),7);Object.assign(w.police,{x:0,y:0,dir:0,moveDir:0});Object.assign(w.player,{x:20,y:0});w.startAttack(mode);return w;}
-test('longer burst restores early charge and 240ms light distance dodges without perfect protection',()=>{
- for(const [mode,press] of [['stand',.24],['lunge',0]])for(const preset of ['rhythm-short-dodge','rhythm-mixed']){
-  const c=presetConfig(preset);c.dodge.perfectDuration=0;c.player.runDrain=0;const w=new World(c,7);Object.assign(w.police,{x:0,y:0,dir:0,moveDir:0});Object.assign(w.player,{x:c.capture[mode].trigger,y:0,stamina:70});w.startAttack(mode);
-  while(!w.result&&w.time+1e-8<c.capture[mode].windup)w.step({x:1,dodge:w.time+1e-8>=press&&w.metrics.dodges===0});
-  assert.equal(w.metrics.perfect,0);assert.equal(w.player.stamina,45);
-  if(preset==='rhythm-short-dodge')assert.equal(w.result,'caught');
-  else {assert.equal(w.result,null);assert.equal(w.events.find(e=>e.type==='miss').cause,'range');}
- }
-});
-test('burst candidate retains recovery penalty, cost, perfect timing, and police performance',()=>{
- const old=presetConfig('rhythm-short-dodge'),now=presetConfig('rhythm-mixed');
- assert.deepEqual(old.capture,now.capture);assert.deepEqual(old.police,now.police);
- for(const key of ['startup','cost','recovery','recoveryScale','perfectDelay','perfectDuration'])assert.equal(now.dodge[key],old.dodge[key]);
- const d=now.dodge,cycleSpeed=RUN*(d.multiplier*d.duration+(1+d.recoveryScale)/2*d.recovery)/(d.startup+d.duration+d.recovery);
- assert.ok(cycleSpeed<RUN*now.police.speedScale,'repeated forward dodges do not outrun a fresh police in unobstructed full cycles');
-});
+function attack(mode){const w=new World(presetConfig('rhythm'),7);Object.assign(w.police,{x:0,y:0,dir:0,moveDir:0});Object.assign(w.player,{x:M(20),y:0});w.startAttack(mode);return w;}
 test('edge-range straight running is caught; contact-range perfect refunds stamina and opens distance',()=>{
  for(const mode of ['stand','lunge'])for(const response of ['none','perfect','late']){
-  const w=attack(mode),m=w.config.capture[mode];w.config.player.runDrain=0;w.player.x=response==='perfect'?(mode==='lunge'?2.2:.9):m.trigger;w.player.stamina=70;
+  const w=attack(mode),m=w.config.capture[mode];w.config.player.runDrain=0;w.player.x=response==='perfect'?M(mode==='lunge'?2.2:.9):m.trigger;w.player.stamina=70;
   const press=m.windup-(response==='perfect'?w.config.dodge.perfectDuration/2:.005);
   while(w.time<m.windup+.001&&!w.result)w.step({x:1,dodge:response!=='none'&&w.metrics.dodges===0&&w.time>=press-1e-8});
   if(response==='perfect'){
    assert.equal(w.metrics.perfect,1);assert.equal(w.player.stamina,70);assert.equal(w.police.attack.recoveryScale,1);
-   const gap=dist(w.player,w.police);while(w.time<m.windup+1&&!w.result)w.step({x:1});assert.ok(dist(w.player,w.police)>gap+3);
+   const gap=dist(w.player,w.police);while(w.time<m.windup+1&&!w.result)w.step({x:1});assert.ok(dist(w.player,w.police)>gap+M(3));
   }else assert.equal(w.result,'caught',`${mode}/${response}`);
  }
 });
@@ -39,7 +24,7 @@ test('fatigue can reduce speed with uninterrupted sight and logs both transition
  w.police.stamina=w.config.police.staminaMax*w.config.police.resumeAt;w.step({});assert.equal(w.police.tired,false);assert.equal(w.events.filter(e=>e.type==='fatigue').at(-1).tired,false);
 });
 test('eye and ear independently show actual sight and fresh hearing; walking emits no cue',()=>{
- const w=attack('stand');w.player.x=3;w.step({x:1,walk:true});assert.deepEqual(perceptionCue(w),{eye:'visible',ear:'quiet'});
+ const w=attack('stand');w.player.x=M(3);w.step({x:1,walk:true});assert.deepEqual(perceptionCue(w),{eye:'visible',ear:'quiet'});
  w.step({x:1});assert.equal(perceptionCue(w).ear,'heard');
  w.police.visible=false;assert.equal(perceptionCue(w).eye,'lost');assert.equal(perceptionCue(w).ear,'heard');
  w.time+=w.config.search.soundInterval;assert.equal(perceptionCue(w).ear,'quiet');
@@ -56,23 +41,14 @@ test('unit perfect timing follows per-attack windup instead of global 300ms',()=
  const dodge=w.events.find(e=>e.type==='dodge');assert.ok(dodge.t>=.55&&dodge.t<.567);
 });
 test('invalid movement onset is rejected',()=>{const c=presetConfig('rhythm');c.capture.lunge.moveFrom=.7;assert.ok(validate(c).length>0);});
-test('old fixed lunge can pass a reversing target; rhythm attacks cannot be beaten by straight phasing',()=>{
- const old=new World(clone(DEFAULT),7);Object.assign(old.police,{x:0,y:0,dir:0,moveDir:0});Object.assign(old.player,{x:2.4,y:0});old.startAttack('lunge');
- while(old.time<.31&&!old.result)old.step({x:-1,y:0});assert.equal(old.result,null);assert.equal(old.metrics.evades,1);
- for(const mode of ['stand','stride','sweep','lunge']) {
-  const w=attack(mode);w.player.x=mode==='lunge'?2.4:.85;
-  while(w.time<.8&&!w.result){w.step({x:-1,y:0});assert.ok(dist(w.player,w.police)>=w.config.player.radius+w.config.police.radius-1e-7);}
-  assert.equal(w.result,'caught',mode);assert.equal(w.metrics.dodges,0);
- }
-});
 test('continuous charge is stopped by physical contact rather than old target travel budget',()=>{
- const w=attack('lunge');w.player.x=1.4;
+ const w=attack('lunge');w.player.x=M(1.4);
  while(w.time<.6-1e-8&&!w.result)w.step({});
- assert.ok(Math.abs(dist(w.police,w.player)-.62)<1e-7);assert.equal(w.police.attack.advanceTarget,undefined);assert.equal(w.result,'caught');
+ assert.ok(Math.abs(dist(w.police,w.player)-M(.62))<1e-7);assert.equal(w.police.attack.advanceTarget,undefined);assert.equal(w.result,'caught');
 });
 test('faster charge tracking catches the late lateral dodge that escaped old tracking on both sides',()=>{
  for(const rate of [180,540])for(const side of [-1,1]){
-  const w=attack('lunge');w.player.x=2.4;w.police.attack.snapshot.turnRate=rate;
+  const w=attack('lunge');w.player.x=M(2.4);w.police.attack.snapshot.turnRate=rate;
   while(w.time<.61&&!w.result)w.step({x:0,y:w.tick>=48?side:0,dodge:w.tick===48});
   if(rate===180){assert.equal(w.result,null);assert.ok(['angle','range'].includes(w.events.find(e=>e.type==='miss').cause));}
   else assert.equal(w.result,'caught');
@@ -81,7 +57,7 @@ test('faster charge tracking catches the late lateral dodge that escaped old tra
 });
 test('light tracking beats resource-free circling and tangential crossing on both sides',()=>{
  for(const mode of ['stand','stride','sweep']) for(const side of [-1,1]) for(const motion of ['orbit','tangent']) for(const radius of [.65,.85,1.2]) {
-  const w=attack(mode);w.player.x=radius;
+  const w=attack(mode);w.player.x=M(radius);
   while(w.time<.31&&!w.result){const t=Math.atan2(w.player.y-w.police.y,w.player.x-w.police.x);w.step(motion==='orbit'?{x:-Math.sin(t)*side,y:Math.cos(t)*side}:{x:0,y:side});}
   assert.equal(w.result,'caught',`${mode}/${side}/${motion}/${radius}`);assert.equal(w.metrics.dodges,0);
  }
@@ -95,6 +71,6 @@ test('spiral response produces curved pursuit and angular miss for lunge, but is
   let burstStartDir=null;
   while(w.time<.61&&!w.result){w.step(drillInput(w));if(w.time>=.4&&burstStartDir===null)burstStartDir=w.police.dir;}
   if(mode==='stand')assert.equal(w.result,'caught');
-  else{assert.equal(w.result,null);const miss=w.events.find(e=>e.type==='miss');assert.ok(['angle','range'].includes(miss.cause));assert.ok(miss.angleDegrees>c.capture.lunge.angle/2);assert.ok(Math.hypot(w.police.x,w.police.y)>.4);assert.ok(Math.abs(w.police.dir-burstStartDir)>.2);}
+  else{assert.equal(w.result,null);const miss=w.events.find(e=>e.type==='miss');assert.ok(['angle','range'].includes(miss.cause));assert.ok(miss.angleDegrees>c.capture.lunge.angle/2);assert.ok(Math.hypot(w.police.x,w.police.y)>M(.4));assert.ok(Math.abs(w.police.dir-burstStartDir)>.2);}
  }
 });

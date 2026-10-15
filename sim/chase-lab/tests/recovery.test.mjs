@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {World,RUN,recoveryMoveScale,validate} from '../dist/core.mjs';
 import {presetConfig} from './geometry-fixture.mjs';
+test('default walking matches sampled native root motion times the independent 3x scale',()=>{
+ const c=presetConfig('practice'),w=new World(c,1);
+ Object.assign(w.player,{x:0,y:0});Object.assign(w.police,{x:-10,y:0});
+ const start=w.player.x;
+ for(let i=0;i<120;i++)w.step({x:1,walk:true});
+ assert.ok(Math.abs(w.player.x-start-2.4591)<1e-9);
+ assert.ok(Math.abs(RUN/(w.player.x-start)-1.9171648164)<1e-8);
+});
 test('normal recovery increases from zero to full speed over 600ms',()=>{
  const c=presetConfig('practice'),start=c.dodge.startup+c.dodge.duration;
  for(const [elapsed,expected] of [[start,0],[start+.3,.5],[start+.6,1]])assert.ok(Math.abs(recoveryMoveScale(c,{elapsed,used:false})-expected)<1e-8);
@@ -10,11 +18,10 @@ test('normal recovery increases from zero to full speed over 600ms',()=>{
  while(w.player.dodge){const before=w.player.x;w.step({x:1});if(w.phase()==='recovery'){const speed=(w.player.x-before)*120;assert.ok(speed+1e-8>=previous);previous=speed;frames++;assert.equal(w.dodge(1,0),false);}}
  assert.ok(frames>=71&&frames<=73);assert.ok(previous>RUN*.98);
 });
-test('perfect window is 100ms inside fixed 300ms dash; legacy constant recovery remains valid',()=>{
+test('perfect window is 100ms inside the fixed current dash',()=>{
  const c=presetConfig('rhythm'),w=new World(c,1);w.player.dodge={elapsed:0,used:false};assert.equal(w.perfect(),true);
  w.player.dodge.elapsed=.099;assert.equal(w.perfect(),true);w.player.dodge.elapsed=.1;assert.equal(w.perfect(),false);
  assert.equal(c.dodge.duration,.3);assert.equal(c.dodge.multiplier,2);assert.equal(c.perfectBonus.playerRecoveryScale,0);
- const old=presetConfig('rhythm-flat-recovery');assert.equal(recoveryMoveScale(old,{elapsed:.6,used:false}),.35);
  c.dodge.recoveryCurve='invalid';assert.ok(validate(c).length>0);
 });
 test('full ordinary forward dodge cycle gives no sustained running speed gain including startup',()=>{

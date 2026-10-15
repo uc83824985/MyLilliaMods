@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lillia · 追逐实验室</title><link rel="stylesheet" href="style.css"></head>
 <body>
-<header><div class="brand"><span class="mark">L / C</span><div><h1>追逐实验室</h1><p>LILLIA · WHITE-BOX CHASE LAB</p></div></div><div class="baseline"><span>原生跑速 <b>3.143 m/s</b></span><span>全局倍率 <b>×2 固定</b></span><span>街宽 <b>12.57 m</b></span></div><span class="tag">本地研究原型 · 120 Hz</span></header>
+<header><div class="brand"><span class="mark">L / C</span><div><h1>追逐实验室</h1><p>LILLIA · WHITE-BOX CHASE LAB</p></div></div><div class="baseline"><span>原生跑速 <b id="native-speed"></b></span><span>全局倍率 <b id="global-scale"></b></span><span>街宽 <b id="street-width"></b></span></div><span class="tag">本地研究原型 · 120 Hz</span></header>
 <main>
 <aside class="panel settings"><div class="section-head"><h2>实验条件</h2><span id="dirty">已应用</span></div>
 <label>参数方案<select id="preset"><option value="candidate">候选起点 · 四种出刀</option><option value="legacy">0.1.3 · 几何复刻基线</option></select></label>
@@ -13,6 +13,15 @@
 <p id="ai-intent" class="hint"></p>
 <p id="search-state" class="hint"></p>
 <p id="attack-gate" class="hint"></p>
+<div id="open-ai-controls" hidden>
+<label>空地人类AI<select id="open-human"></select></label>
+<label>空地警察AI<select id="open-hunter"></select></label>
+<p id="open-defects" class="hint"></p>
+<button id="apply-open-ai" class="full">应用双方AI并重开</button>
+<p id="open-active" class="hint"></p>
+<p id="open-timing" class="hint"></p>
+<p id="open-pressure-readout" class="hint"></p>
+</div>
 <div id="drill-controls" hidden>
 <h3>单元场景条件</h3>
 <label>入口<select id="drill-entry"><option value="attack">固定近距，立即出刀</option><option value="recovery">已落空，直接后摇</option></select></label>
@@ -23,7 +32,7 @@
 <label>后摇移动<select id="drill-walk"><option value="true">步行回体</option><option value="false">跑动／声音风险</option></select></label>
 <p class="hint">修改后应用。脚本不模拟人类反应，不选择逃跑路线；直接后摇入口不能证明闪避成功。</p>
 </div>
-<label>地图布局<select id="map-layout"><option value="ring">回字 · 单中央街区</option><option value="grid">田字 · 历史四街区</option></select></label><label>出生位置<select id="spawn"><option value="street">直线街道</option><option value="junction">弯道／路口</option><option value="corner">转角附近</option><option value="random">三场景随机</option></select></label>
+<label>地图布局<select id="map-layout"><option value="ring">回字 · 单中央街区</option><option value="open">空地 · 无障碍实验</option><option value="grid">田字 · 历史四街区</option></select></label><label>出生位置<select id="spawn"><option value="street">直线街道</option><option value="junction">弯道／路口</option><option value="corner">转角附近</option><option value="random">三场景随机</option></select></label>
 <label>控制方式<select id="policy"><option value="adaptive">AI · 玩家倾向 / 学习</option><option value="retreat">AI · 无资源后撤</option><option value="footwork">AI · 无资源绕身</option><option value="reactive">AI · 见红后撤闪避</option><option value="anticipate">AI · 接近时预判</option><option value="perfect">AI · 目押完美</option><option value="manual">玩家 · WASD / Space</option></select></label>
 <div id="parameters"></div>
 <details><summary>每种出刀性能</summary><div id="attacks"></div></details>
@@ -33,7 +42,7 @@
 <p id="message" role="status" class="hint">所有修改在重开后生效；不影响游戏插件。</p>
 </aside>
 <section class="stage-area">
-<div class="toolbar"><div><label class="seed-control">种子<input id="seed" type="number" value="42" min="0" max="4294967295" step="1" title="修改后按Enter或点击重开"></label><button id="start">▶ 开始</button><button id="pause">暂停</button><button id="step">单步</button><button id="takeover" aria-pressed="false">玩家接管</button><button id="zoom" class="accent" aria-pressed="true">局部放大</button></div><label>速度<select id="speed"><option value=".25">0.25×</option><option value=".5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label></div>
+<div class="toolbar"><div><label class="seed-control">种子<input id="seed" type="number" value="42" min="0" max="4294967295" step="1" title="修改后按Enter或点击重开"></label><label class="seed-control">观察时限 / 秒<input id="duration" type="number" value="40" min="1" max="300" step="1" title="1–300秒；修改后重建对局，按Enter开始"></label><button id="start">▶ 开始</button><button id="pause">暂停</button><button id="step">单步</button><button id="takeover" aria-pressed="false">玩家接管</button><button id="zoom" class="accent" aria-pressed="true">局部放大</button></div><label>速度<select id="speed"><option value=".25">0.25×</option><option value=".5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label></div>
 <div class="canvas-wrap"><canvas id="arena" tabindex="0" aria-label="街道追逐场景，WASD移动，空格闪避"></canvas><div class="stage-label"><span id="run-label">候选起点</span><small id="map-label">俯视 · 米制 · 回字单街区</small></div><div id="overlay" class="overlay"><b>准备开始</b><span>先观察 AI，可在控制方式中切换玩家</span></div><div class="legend"><span class="cyan">● 主角</span><span class="orange">● 警察</span><span>红：前摇 / 命中范围</span><span>白：闪避 / 完美窗口</span></div></div>
 <div class="telemetry"><div><small>本轮状态</small><b id="state">准备</b></div><div><small>追逐时间</small><b id="time">0.00 s</b></div><div><small>双方距离</small><b id="distance">—</b></div><div><small>有效躲过 / 完美</small><b id="evades">0 / 0</b></div><div><small>综合得分</small><b id="score">0</b></div></div>
 <div class="resources"><div><span>主角体力 <b id="p-stamina"></b></span><meter id="p-meter" min="0" max="100"></meter></div><div><span>警察体力 <b id="e-stamina"></b></span><meter id="e-meter" min="0" max="100"></meter></div><div><span>断视线记忆 <b id="memory"></b></span><meter id="memory-meter" min="0" max="1"></meter></div></div>

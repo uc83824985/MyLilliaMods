@@ -11,7 +11,16 @@ ws.addEventListener('message', event => {
   const p = pending.get(msg.id); if (!p) return; clearTimeout(p.timer); pending.delete(msg.id); msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result);
 });
 function call(method, params = {}, session = sessionId) { return new Promise((resolve, reject) => { const key = ++id, timer = setTimeout(() => reject(new Error('timeout: ' + method)), 90000); pending.set(key, { resolve, reject, timer }); ws.send(JSON.stringify({ id: key, method, params, ...(session ? { sessionId: session } : {}) })); }); }
-async function evaluate(expression) { const r = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
+async function evaluate(expression) { let r; try { r = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); } catch(error) { throw new Error(`${error.message}; expression: ${expression.slice(0,240)}`); } if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
+async function waitForBrowser(expression, timeoutMs){
+  const started=Date.now();let reported=started;
+  while(!await evaluate(expression)){
+    if(Date.now()-started>timeoutMs)throw Error('Browser work timeout: '+await evaluate('document.querySelector("#progress-label").textContent'));
+    if(Date.now()-reported>15000){console.log(JSON.stringify({stage:'browser-worker',progress:await evaluate('document.querySelector("#progress-label").textContent')}));reported=Date.now();}
+    await new Promise(resolve=>setTimeout(resolve,250));
+  }
+}
+
 try {
   ({ targetId } = await call('Target.createTarget', { url: 'about:blank', background: true }, null));
   ({ sessionId } = await call('Target.attachToTarget', { targetId, flatten: true }, null));
@@ -19,6 +28,8 @@ try {
   await call('Page.navigate', { url: 'http://127.0.0.1:4173/?preset=candidate&seed=42&steps=20' });
   for (let i = 0; i < 100 && !await evaluate('document.documentElement.dataset.labReady === "true"'); i++) await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(await evaluate('document.documentElement.dataset.labReady'), 'true');
+  assert.equal(await evaluate('document.querySelector("#global-scale").textContent'), '×1.5 固定');
+  assert.equal(await evaluate('document.querySelector("#street-width").textContent'), '9.43 m');
   assert.equal(await evaluate('document.querySelector("#zoom").getAttribute("aria-pressed")'),'true');
   await evaluate('document.querySelector("#zoom").click()');
   assert.equal(await evaluate('document.querySelector("#zoom").getAttribute("aria-pressed")'),'false');
@@ -27,6 +38,13 @@ try {
   await evaluate('document.querySelector("#takeover").click();document.querySelector("#arena").focus();window.dispatchEvent(new KeyboardEvent("keydown",{code:"KeyW"}));for(let i=0;i<20;i++)document.querySelector("#step").click();window.dispatchEvent(new KeyboardEvent("keyup",{code:"KeyW"}));document.querySelector("#export-replay").click();');
   const replay = JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
   assert.equal(replay.control, 'manual'); assert.equal(replay.endTick, 40);
+  await evaluate('document.querySelector("#seed").value=39;document.querySelector("#seed").dispatchEvent(new Event("input"));document.querySelector("#seed").dispatchEvent(new Event("change"));document.querySelector("#export-replay").click()');
+  const reseeded=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.equal(reseeded.seed,39);assert.equal(reseeded.endTick,0);assert.equal(reseeded.control,'manual');
+  assert.match(await evaluate('document.querySelector("#run-label").textContent'),/39/);
+  await evaluate('document.querySelector("#seed").value=41;document.querySelector("#step").click();document.querySelector("#export-replay").click()');
+  const steppedSeed=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.equal(steppedSeed.seed,41);assert.equal(steppedSeed.endTick,1);
   assert.equal(await evaluate('document.querySelector("#policy").value'), 'manual');
   const w = new World(replay.config, replay.seed); let index = 0, input = {};
   while (w.tick < replay.endTick) { while (index < replay.inputs.length && replay.inputs[index].tick <= w.tick + 1) input = replay.inputs[index++].input; w.step(input); }
@@ -51,12 +69,12 @@ try {
   await evaluate('document.querySelector("#policy").value="adaptive";document.querySelector("#policy").dispatchEvent(new Event("change"))');
   assert.equal(await evaluate('document.querySelector("#takeover").getAttribute("aria-pressed")'), 'false');
   await evaluate('document.querySelector("#preset").value="single-stride";document.querySelector("#try-preset").click();document.querySelector("#full-matrix").checked=true;let c=JSON.parse(document.querySelector("#json").value);c.duration=2;document.querySelector("#json").value=JSON.stringify(c);document.querySelector("#read-json").click();document.querySelector("#apply").click();document.querySelector("#samples").value=2;document.querySelector("#batch").click();');
-  await evaluate('new Promise((resolve,reject)=>{const start=Date.now();const t=setInterval(()=>{if(!document.querySelector("#export-report").disabled){clearInterval(t);resolve(true)}else if(Date.now()-start>75000){clearInterval(t);reject(new Error(document.querySelector("#progress-label").textContent))}},100)})');
+  await waitForBrowser('!document.querySelector("#export-report").disabled',180000);
   await evaluate('document.querySelector("#export-report").click()');
   const report = JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
   assert.equal(report.cells.length, 210); assert.ok(report.cells.every(c => c.n === 2)); assert.equal(report.games.length, 6);
   await evaluate('document.querySelector("#full-matrix").checked=false;document.querySelector("#batch").click()');
-  await evaluate('new Promise((resolve,reject)=>{const start=Date.now();const t=setInterval(()=>{if(document.querySelector("#cancel").disabled){clearInterval(t);resolve(true)}else if(Date.now()-start>15000){clearInterval(t);reject(new Error("current weights timeout"))}},100)})');
+  await waitForBrowser('document.querySelector("#cancel").disabled',30000);
   await evaluate('document.querySelector("#export-report").click()');
   const current = JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
   assert.equal(current.cells.length, 7); assert.ok(current.cells.every(c => c.distribution === 'current'));
@@ -103,6 +121,51 @@ try {
   assert.equal(JSON.parse(await evaluate('window.__downloads.at(-1).text()')).summary.result, 'timeout');
   await evaluate('document.querySelector("#start").click();document.querySelector("#pause").click();document.querySelector("#export-replay").click()');
   assert.equal(JSON.parse(await evaluate('window.__downloads.at(-1).text()')).endTick, 0);
+  await evaluate('document.querySelector("#preset").value="mirror-idle-return";document.querySelector("#try-preset").click();if(document.querySelector("#policy").value!=="manual")document.querySelector("#takeover").click();document.querySelector("#arena").focus();window.dispatchEvent(new KeyboardEvent("keydown",{code:"KeyF"}));document.querySelector("#step").click();window.dispatchEvent(new KeyboardEvent("keyup",{code:"KeyF"}));for(let i=0;i<180;i++)document.querySelector("#step").click();document.querySelector("#export-replay").click()');
+  const mirrorReplay=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.ok(mirrorReplay.events.some(e=>e.type==='mirror'&&e.phase==='teleport'));
+  assert.equal(await evaluate('document.querySelector("#arena").dataset.playerMovement'),'mirrorLanding');
+  assert.ok(await evaluate('!!document.getElementById("p-mirror.playerRecovery")'));
+  await evaluate('document.querySelector("#preset").value="mirror-cancel-intercept";document.querySelector("#try-preset").click();document.querySelector("#arena").focus();window.dispatchEvent(new KeyboardEvent("keydown",{code:"KeyG"}));document.querySelector("#step").click();window.dispatchEvent(new KeyboardEvent("keyup",{code:"KeyG"}));for(let i=0;i<45;i++)document.querySelector("#step").click();document.querySelector("#export-replay").click()');
+  const cancelReplay=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.ok(cancelReplay.events.some(e=>e.type==='mirror'&&e.phase==='cancel'&&e.reason==='input'));
+  assert.equal(cancelReplay.events.some(e=>e.type==='mirror'&&e.phase==='teleport'),false);
+  const cancelWorld=new World(cancelReplay.config,cancelReplay.seed);let ci=0,cin={};
+  while(cancelWorld.tick<cancelReplay.endTick){while(ci<cancelReplay.inputs.length&&cancelReplay.inputs[ci].tick<=cancelWorld.tick+1)cin=cancelReplay.inputs[ci++].input;cancelWorld.step(cin);}
+  assert.deepEqual(cancelWorld.events,cancelReplay.events);assert.equal(cancelWorld.player.stamina,60);assert.equal(cancelWorld.mirror.player.cancelled,true);
+  await evaluate('document.querySelector("#preset").value="mirror-ai-intercept";document.querySelector("#try-preset").click();if(document.querySelector("#policy").value==="manual")document.querySelector("#takeover").click();for(let i=0;i<640;i++)document.querySelector("#step").click();document.querySelector("#export-replay").click()');
+  const mirrorAIReplay=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.ok(mirrorAIReplay.events.some(e=>e.type==='mirror-ai'&&e.choice==='enter'));
+  assert.ok(mirrorAIReplay.events.some(e=>e.type==='mirror'&&e.phase==='teleport'&&e.actor==='player'));
+  assert.deepEqual([mirrorAIReplay.config.mirror.playerWindup,mirrorAIReplay.config.mirror.playerRecovery,mirrorAIReplay.config.mirror.policeWindup,mirrorAIReplay.config.mirror.policeRecovery],[1,1,2,1]);
+  assert.ok(await evaluate('!!document.getElementById("p-mirror.ai.playerDelay")'));
+  await evaluate('document.querySelector("#preset").value="mirror-integration-feint";document.querySelector("#try-preset").click();document.querySelector("#mirror-command").value="teleport";document.querySelector("#issue-mirror-command").click();for(let i=0;i<360;i++)document.querySelector("#step").click();document.querySelector("#export-replay").click()');
+  const integrationReplay=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.equal(await evaluate('document.querySelector("#mirror-command-panel").hidden'),false);
+  assert.ok(integrationReplay.inputs.some(row=>row.input.mirrorCommands?.some(command=>command.action==='teleport')));
+  assert.ok(integrationReplay.branchStats.nodes.casting&&integrationReplay.branchStats.nodes.landing);
+  assert.ok(integrationReplay.events.some(event=>event.type==='mirror-decision'));
+  await evaluate('document.querySelector("#preset").value="mirror-equilibrium-low";document.querySelector("#try-preset").click();for(let i=0;i<240;i++)document.querySelector("#step").click();document.querySelector("#export-replay").click()');
+  const equilibriumReplay=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.ok(equilibriumReplay.config.mirror.ai.integration.mixtureByExposure.low);
+  const sampled=equilibriumReplay.events.find(e=>e.choice==='strategy-sample');assert.ok(sampled?.player&&sampled?.police);
+  assert.deepEqual(new World(equilibriumReplay.config,equilibriumReplay.seed).mirror.sampledStrategies,{player:sampled.player,police:sampled.police});
+  await evaluate('document.querySelector("#preset").value="open-equilibrium-fast";document.querySelector("#try-preset").click();document.querySelector("#open-human").value="reverse";document.querySelector("#open-human").dispatchEvent(new Event("change"));document.querySelector("#open-hunter").value="slow_scan";document.querySelector("#open-hunter").dispatchEvent(new Event("change"));document.querySelector("#apply-open-ai").click();document.querySelector("#export-replay").click()');
+  const openReplay=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.equal(openReplay.config.duel.human,'reverse');assert.equal(openReplay.config.duel.hunter,'slow_scan');
+  assert.equal(openReplay.config.search.scanTurnRate,45);assert.equal(openReplay.config.player.staminaMax,100);assert.equal(openReplay.config.player.walkRegen,20);
+  assert.equal(await evaluate('document.querySelector("#open-ai-controls").hidden'),false);
+  await evaluate('document.querySelector("#open-human").value="equilibrium";document.querySelector("#open-human").dispatchEvent(new Event("change"));document.querySelector("#apply-open-ai").click();document.querySelector("#seed").value=97;document.querySelector("#seed").dispatchEvent(new Event("change"));document.querySelector("#export-replay").click()');
+  const openReseed=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.equal(openReseed.seed,97);assert.equal(openReseed.config.duel.hunter,'slow_scan');
+  assert.equal(new World(openReseed.config,97).config.duel.human,openReseed.config.duel.human);
+  await evaluate('document.getElementById("open-human").value="reverse_early30";document.getElementById("open-human").dispatchEvent(new Event("change"));document.getElementById("p-duel.pressure").value=.5;document.getElementById("p-duel.pressure").dispatchEvent(new Event("input"));document.getElementById("apply-open-ai").click();document.getElementById("export-replay").click()');
+  const pressureReplay=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.equal(pressureReplay.config.duel.pressure,.5);assert.equal(pressureReplay.config.duel.human,'reverse_early30');assert.equal(pressureReplay.config.duel.hunter,'slow_scan');assert.equal(pressureReplay.seed,97);
+  await evaluate('document.getElementById("preset").value="open-bait-nervous";document.getElementById("try-preset").click();document.getElementById("seed").value=2996376793;document.getElementById("seed").dispatchEvent(new Event("change"));for(let i=0;i<700;i++)document.getElementById("step").click();document.getElementById("export-replay").click()');
+  const baitReplay=JSON.parse(await evaluate('window.__downloads.at(-1).text()'));
+  assert.equal(baitReplay.summary.caughtAfterPreemptiveDodge,1);assert.equal(baitReplay.summary.caughtWithStaminaNoDodge,1);assert.equal(baitReplay.summary.caughtWithStaminaReadyNoDodge,0);
+  assert.ok(baitReplay.events.some(e=>e.type==='bait'&&e.phase==='noticed-dodge'));assert.ok(baitReplay.events.find(e=>e.type==='caught').stamina>=25);
   assert.equal(errors.length, 0, JSON.stringify(errors));
   const result = { browserNodeReplayIdentical: true, manualTakeover: true, takeoverButtonRestored: true, defaultLocalZoom: true, restartDuringAndAfterGame: true, draftApplication: true, workerCells: report.cells.length, workerEpisodes: report.cells.length * 2, cancellation: true, javascriptErrors: errors.length, screenshots: 0 };
   await mkdir('../../artifacts/chase-lab', { recursive: true }); await writeFile('../../artifacts/chase-lab/browser-check.json', JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
